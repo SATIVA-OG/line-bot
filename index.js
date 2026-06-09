@@ -50,15 +50,18 @@ async function handleImageMessage(event) {
 
     if (error) {
       console.error("❌ Upload error:", error);
-      return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: "อัปโหลดรูปไป Supabase ไม่สำเร็จ",
+      return lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{
+          type: "text",
+          text: "อัปโหลดรูปไป Supabase ไม่สำเร็จ",
+        }]
       });
     }
 
     console.log("✅ Uploaded to Supabase:", data);
 
-    // --- ส่วนที่เพิ่ม: ใช้ Gemini จำแนกรูปภาพสัตว์ ---
+    // ใช้ Gemini จำแนกรูปภาพสัตว์ ---
     let animalName = "ไม่สามารถระบุได้";
     try {
       const aiResponse = await ai.models.generateContent({
@@ -76,6 +79,12 @@ async function handleImageMessage(event) {
               }
             ]
           }
+        ],
+        safetySettings: [
+          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
         ]
       });
       animalName = aiResponse.text;
@@ -94,6 +103,13 @@ async function handleImageMessage(event) {
     });
   } catch (err) {
     console.error("❌ Error:", err);
+    // ตอบกลับ user เมื่อเกิด error ที่ไม่คาดคิด
+    try {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: "text", text: "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้งครับ" }]
+      });
+    } catch (_) {}
   }
 }
 
@@ -124,24 +140,24 @@ async function handleEvent(event) {
   let content = null;
   let botReplyText = '';
 
-  // ตรวจสอบเงื่อนไขตามประเภทข้อความ
-  if (event.message.type === 'text') {
-    content = event.message.text;
-    try {
-      // เรียกใช้ Gemini API ตามโจทย์
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: content,
-      });
-      botReplyText = response.text;
-    } catch (e) {
-      console.error('Gemini API Error:', e);
-      botReplyText = 'ขออภัย ระบบตอบกลับอัตโนมัติมีปัญหาครับ';
-    }
-  } else {
-    // หากเป็นประเภทอื่น เช่น image, sticker, video
-    content = `[Received ${messageType} message]`;
-    botReplyText = `ได้รับข้อความประเภท ${messageType} แล้วครับ`;
+  // ณ จุดนี้ event.message.type เป็น 'text' เสมอ (ผ่าน guard ด้านบนแล้ว)
+  content = event.message.text;
+  try {
+    // เรียกใช้ Gemini API
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: content,
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      ]
+    });
+    botReplyText = response.text ?? 'ขออภัย ไม่สามารถประมวลผลคำตอบได้';
+  } catch (e) {
+    console.error('Gemini API Error:', e);
+    botReplyText = 'ขออภัย ระบบตอบกลับอัตโนมัติมีปัญหาครับ';
   }
 
   try {
